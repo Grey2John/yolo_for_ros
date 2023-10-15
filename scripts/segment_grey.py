@@ -98,11 +98,11 @@ class Yolov5Segment:
         if self.if_publish_rgb8:
             self.origin_w = rospy.get_param("~inference_size_w")
             self.pred_rgba8_pub = rospy.Publisher(
-                rospy.get_param("~output_image_topic"), Image, queue_size=30
+                rospy.get_param("~output_image_topic")+"/bgra", Image, queue_size=30
             )
-        elif self.if_publish_mask:
+        if self.if_publish_mask:
             self.pred_image_pub = rospy.Publisher(
-                rospy.get_param("~output_image_topic"), Image, queue_size=30
+                rospy.get_param("~output_image_topic")+"mono", Image, queue_size=30
             )
         # Initialize CV_Bridge
         self.bridge = CvBridge()
@@ -163,7 +163,7 @@ class Yolov5Segment:
         if self.if_publish_rgb8:
             mix_msg = self.mix_post_process(masks, det[:, 5], data, img)
             self.pred_rgba8_pub.publish(mix_msg)
-        elif self.if_publish_mask:
+        if self.if_publish_mask:
             grey_msg = self.mask_post_process(masks, det[:, 5], data)
             # print(grey_msg.header.stamp.nsecs)
             self.pred_image_pub.publish(grey_msg)
@@ -236,13 +236,13 @@ class Yolov5Segment:
             grey_mask = np.zeros((720, 960), dtype=np.uint8)
             for i, c in enumerate(class_num):
                 grey_mask += (masks_[i]*int(c+1)).astype(np.uint8)
-            grey_mask_ = np.where(grey_mask>2, 100, grey_mask*50)
+            grey_mask_ = np.where(grey_mask>2, 2, grey_mask)
 
             masks_big_size = np.zeros( (720, self.cut_start) )
             grey_mask_1 = np.concatenate((masks_big_size, grey_mask_), axis=1)
             grey_mask_2 = np.concatenate((grey_mask_1, masks_big_size), axis=1)
             mix_img = np.concatenate((origin_img, np.expand_dims(grey_mask_2, axis=2)), axis=2)  # (720, 1280, 4)
-
+            
             mix_msg = self.bridge.cv2_to_imgmsg(mix_img.astype(np.uint8), encoding="bgra8")
             mix_msg.header = data.header
             mix_msg.header.frame_id = "mask_frame"
