@@ -71,7 +71,7 @@ class Yolov5Segment:
             self.model.model.half() if self.half else self.model.model.float()
 
         # Setting inference size
-        self.img_size = [rospy.get_param("~inference_size_h", 640), rospy.get_param("~inference_size_w",640)]
+        self.img_size = [rospy.get_param("~inference_size_h", 640), rospy.get_param("~inference_size_w_cut",640)]
         self.img_size = check_img_size(self.img_size, s=self.stride)
         
         bs = 1  # batch_size
@@ -92,9 +92,15 @@ class Yolov5Segment:
                 input_image_topic, Image, self.PredictCallback, queue_size=300
             )
         # Initialize image/box publisher
-        self.if_publish_image = rospy.get_param("~if_publish_image")
+        self.if_publish_mask = rospy.get_param("~if_publish_mask")
+        self.if_publish_rgb8 = rospy.get_param("~if_publish_rgb8")
         self.if_publish_box = rospy.get_param("~if_publish_box")
-        if self.if_publish_image:
+        if self.if_publish_rgb8:
+            self.origin_w = rospy.get_param("~inference_size_w")
+            self.pred_rgba8_pub = rospy.Publisher(
+                rospy.get_param("~output_image_topic"), Image, queue_size=30
+            )
+        elif self.if_publish_mask:
             self.pred_image_pub = rospy.Publisher(
                 rospy.get_param("~output_image_topic"), Image, queue_size=30
             )
@@ -154,15 +160,19 @@ class Yolov5Segment:
 
         # Stream results
         # im0 = annotator.result()  # add annotation results to im0
-        if self.if_publish_image:
-            grey_msg = self.post_process(masks, det[:, 5], data)
-            print(grey_msg.header.stamp.nsecs)
+        if self.if_publish_rgb8:
+            mix_msg = self.mix_post_process(masks, det[:, 5], data, img)
+            self.pred_rgba8_pub.publish(mix_msg)
+        elif self.if_publish_mask:
+            grey_msg = self.mask_post_process(masks, det[:, 5], data)
+            # print(grey_msg.header.stamp.nsecs)
             self.pred_image_pub.publish(grey_msg)
         
-
+        
     def preprocess(self, img):
         """
-        Adapted from yolov5/utils/datasets.py LoadStreams class
+        Adapted from yolov5/utils/datasets.py LoadStreams class. 
+        generate the inference sample typically
         """
         # rospy.loginfo(im.shape)
         # rospy.loginfo("the image type is: {}".format(type(img)))
@@ -175,18 +185,75 @@ class Yolov5Segment:
 
         return img, img_origin
 
-    def post_process(self, masks, class_num, data):
+    def mask_post_process(self, masks, class_num, data):
         masks = masks.detach().cpu().numpy()
         class_num = class_num.detach().cpu().numpy()
+        # print(class_num)
+        indexs = []
+        for l in range(0, 2):
+            indexs.append([index for index, value in enumerate(class_num) if value == l])
+
+        if len(indexs[0]) < 2 and len(indexs[1]) < 2:
+            masks_ = masks
+        else:
+            masks_ = np.zeros((2, 720, 960))
+            class_list = []
+            for label in range(0, 2):
+                if len(indexs[label]) != 0:
+                    class_list.append(label)
+                    masks_[label] = np_merge(masks, indexs[label])
+            class_num = np.array(class_list)
+
         grey_mask = np.zeros((720, 960), dtype=np.uint8)
         for i, c in enumerate(class_num):
-            grey_mask += (masks[i]*int(c)*20).astype(np.uint8)
+            grey_mask += (masks_[i]*int(c+1)).astype(np.uint8)
+        grey_mask_ = np.where(grey_mask>2, 100, grey_mask*50)
 
-        grey_msg = self.bridge.cv2_to_imgmsg(grey_mask, encoding='mono8')
+        grey_msg = self.bridge.cv2_to_imgmsg(grey_mask_, encoding='mono8')
         # grey_msg = self.bridge.cv2_to_compressed_imgmsg(grey_mask, encoding='mono8')
         grey_msg.header = data.header
         grey_msg.header.frame_id = "mask_frame"
         return grey_msg
+
+    def mix_post_process(self, masks, class_num, data, origin_img):
+            masks = masks.detach().cpu().numpy()
+            class_num = class_num.detach().cpu().numpy()
+            indexs = []
+            for l in range(0, 2):
+                indexs.append([index for index, value in enumerate(class_num) if value == l])
+
+            if len(indexs[0]) < 2 and len(indexs[1]) < 2:
+                masks_ = masks
+            else:
+                masks_ = np.zeros((2, 720, 960))
+                class_list = []
+                for label in range(0, 2):
+                    if len(indexs[label]) != 0:
+                        class_list.append(label)
+                        masks_[label] = np_merge(masks, indexs[label])
+                class_num = np.array(class_list)
+
+            grey_mask = np.zeros((720, 960), dtype=np.uint8)
+            for i, c in enumerate(class_num):
+                grey_mask += (masks_[i]*int(c+1)).astype(np.uint8)
+            grey_mask_ = np.where(grey_mask>2, 100, grey_mask*50)
+
+            masks_big_size = np.zeros( (720, self.cut_start) )
+            grey_mask_1 = np.concatenate((masks_big_size, grey_mask_), axis=1)
+            grey_mask_2 = np.concatenate((grey_mask_1, masks_big_size), axis=1)
+            mix_img = np.concatenate((origin_img, np.expand_dims(grey_mask_2, axis=2)), axis=2)  # (720, 1280, 4)
+
+            mix_msg = self.bridge.cv2_to_imgmsg(mix_img.astype(np.uint8), encoding="bgra8")
+            mix_msg.header = data.header
+            mix_msg.header.frame_id = "mask_frame"
+            return mix_msg
+
+
+def np_merge(father_m, index):
+    sub_matrix = np.take(father_m, index, axis=0)
+    sum_matrix = np.sum(sub_matrix, axis=0)
+    one_matrix = np.where(sum_matrix>0.5, 1, 0)
+    return one_matrix
 
 
 if __name__ == "__main__":

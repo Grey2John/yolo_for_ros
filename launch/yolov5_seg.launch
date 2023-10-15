@@ -1,6 +1,6 @@
 <launch>
     <!-- Detection configuration -->
-    <arg name="weights" default="$(find yolov5_ros)/weights/1280_seg_m.pt" />
+    <arg name="weights" default="$(find yolov5_ros)/weights/seg720x960.pt" />
     <arg name="data" default="$(find yolov5_ros)/data/coco128.yaml"/>
     <arg name="confidence_threshold" default="0.5" />
     <arg name="iou_threshold" default="0.5" />
@@ -15,7 +15,8 @@
     <arg name="half" default="false" />
 
     <!-- replace imgsz -->
-    <arg name="inference_size_w" default="960"/>
+    <arg name="inference_size_w" default="1280"/>
+    <arg name="inference_size_w_cut" default="960"/>
     <arg name="inference_size_h" default="720"/>
 
     <!-- ROS input topics -->
@@ -24,7 +25,8 @@
     
     <!-- choose the output type -->
     <arg name="if_publish_box" default="true"/>
-    <arg name="if_publish_image" default="true"/>
+    <arg name="if_publish_mask" default="false"/>
+    <arg name="if_publish_rgb8" default="true"/>
 
     <!-- Optional topic (publishing annotated image) -->
     <arg name="output_image_topic" default="/yolov5/segment"/>
@@ -48,11 +50,13 @@
 
         <param name="inference_size_h" value="$(arg inference_size_h)"/>
         <param name="inference_size_w" value="$(arg inference_size_w)"/>
+        <param name="inference_size_w_cut" value="$(arg inference_size_w_cut)"/>
 
         <param name="input_image_topic" value="$(arg input_image_topic)"/>
 
         <param name="if_publish_box" value="$(arg if_publish_box)"/>
-        <param name="if_publish_image" value="$(arg if_publish_image)"/>
+        <param name="if_publish_mask" value="$(arg if_publish_mask)"/>
+        <param name="if_publish_rgb8" value="$(arg if_publish_rgb8)"/>
 
         <param name="output_image_topic" value="$(arg output_image_topic)"/>
         <param name="output_box_topic" value="$(arg output_box_topic)"/>
